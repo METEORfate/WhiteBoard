@@ -1,0 +1,18 @@
+{
+  "name": "collab-whiteboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "支持离线协作的多人实时白板 —— 零依赖，node server/index.js 即可运行",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "test": "node --test \"tests/*.test.js\"",
+    "report": "node scripts/report.js"
+  },
+  "keywords": ["whiteboard", "websocket", "offline-first", "lww", "crdt"],
+  "license": "MIT"
+}

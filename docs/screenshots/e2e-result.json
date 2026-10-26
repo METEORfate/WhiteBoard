@@ -1,0 +1,83 @@
+{
+  "at": "2026-10-26T13:07:02.220Z",
+  "room": "e2e-mvp9tn5e",
+  "passed": 15,
+  "total": 15,
+  "results": [
+    {
+      "name": "页面 A 建立 WebSocket 连接并完成握手",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "A 用矩形工具画出一个矩形",
+      "ok": true,
+      "detail": "图形数 1"
+    },
+    {
+      "name": "页面 B 加入同一房间后立即看到 A 画的矩形",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "两端图形 id 与几何完全一致",
+      "ok": true,
+      "detail": "A={\"id\":\"68a80c00-200d-4651-9d54-301ba6c4454b\",\"x\":299,\"y\":191,\"w\":180} B={\"id\":\"68a80c00-200d-4651-9d54-301ba6c4454b\",\"x\":299,\"y\":191,\"w\":180}"
+    },
+    {
+      "name": "B 本地成功画出椭圆",
+      "ok": true,
+      "detail": "{\"n\":2,\"tool\":\"select\",\"types\":[\"rect\",\"ellipse\"]}"
+    },
+    {
+      "name": "A 实时收到 B 画的椭圆（双向同步）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "文本工具可创建文本图形",
+      "ok": true,
+      "detail": "文本图形 1 个"
+    },
+    {
+      "name": "A 断网后状态条切换为「离线」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "断网期间 A 仍可继续绘制",
+      "ok": true,
+      "detail": "A 本地 5 个图形"
+    },
+    {
+      "name": "断网期间的修改只进本地队列，未同步给 B",
+      "ok": true,
+      "detail": "B 仍 3 个 / 队列 2 条"
+    },
+    {
+      "name": "重连后两端状态完全一致（digest 相同）",
+      "ok": true,
+      "detail": "123 字节指纹"
+    },
+    {
+      "name": "离线队列全部清空",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "并发修改不同字段：两个操作都被保留（字段级 LWW）",
+      "ok": true,
+      "detail": "x=120 fill=#fde68a"
+    },
+    {
+      "name": "并发后两端收敛到同一状态",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "页面无未捕获异常 / console.error",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
