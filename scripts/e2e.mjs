@@ -4,6 +4,9 @@
  * 用 CDP 驱动本机 Chrome 打开两个标签页，模拟真实的「画图 → 同步 → 断网 → 恢复」流程，
  * 并截图存档。不依赖 Playwright / Puppeteer，只用了项目自带的 WebSocket 客户端。
  *
+ * 目标地址上没有服务时会自动起一个临时服务端（用临时 DATA_DIR，跑完即删），
+ * 所以直接 `node scripts/e2e.mjs` 就行；要测已有实例则用 --url 指定。
+ *
  * 用法：node scripts/e2e.mjs [--url http://127.0.0.1:8787] [--out docs/screenshots]
  */
 
@@ -12,6 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { connectWS } from '../server/ws.js';
 
@@ -235,12 +239,71 @@ function check(name, ok, detail = '') {
   console.log(`${ok ? '  ✔' : '  ✘'} ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+/** 探一下目标地址是否已经有服务在跑 */
+function probe(baseUrl) {
+  return new Promise((resolve, reject) => {
+    const u = new URL('/healthz', baseUrl);
+    const req = http.get(
+      { host: u.hostname, port: u.port || 80, path: u.pathname, agent: false, timeout: 1500 },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(true));
+      },
+    );
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('healthz 超时')));
+  });
+}
+
+/** 没服务就起一个临时的；有服务就复用（返回 null） */
+async function ensureServer() {
+  try {
+    await probe(BASE_URL);
+    return null;
+  } catch {
+    /* 继续，自己起一个 */
+  }
+  const port = Number(new URL(BASE_URL).port || 8787);
+  const dataDir = mkdtempSync(join(tmpdir(), 'wb-e2e-data-'));
+  const child = spawn(process.execPath, ['server/index.js'], {
+    cwd: fileURLToPath(new URL('..', import.meta.url)),
+    env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, STRICT_PORT: '1', WB_QUIET: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let log = '';
+  child.stdout.on('data', (d) => {
+    log += d.toString();
+  });
+  child.stderr.on('data', (d) => {
+    log += d.toString();
+  });
+
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    if (child.exitCode !== null) {
+      throw new Error(`临时服务端启动失败（退出码 ${child.exitCode}）：\n${log.slice(-800)}`);
+    }
+    try {
+      await probe(BASE_URL);
+      return { child, dataDir };
+    } catch {
+      if (Date.now() > deadline) throw new Error(`临时服务端 15s 内未就绪：\n${log.slice(-800)}`);
+      await sleep(120);
+    }
+  }
+}
+
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
   const profile = mkdtempSync(join(tmpdir(), 'wb-chrome-'));
   const chrome = findChrome();
   console.log(`使用浏览器：${chrome}`);
   console.log(`调试端口：${DEBUG_PORT}`);
+
+  // 目标地址没起服务就自己起一个：README 只写了「跑这个脚本」，
+  // 不该要求使用者先记得另开一个终端把服务端跑起来。
+  const server = await ensureServer();
+  if (server) console.log(`已自动启动临时服务端：${BASE_URL}（数据目录 ${server.dataDir}）`);
 
   const child = spawn(
     chrome,
@@ -268,6 +331,18 @@ async function main() {
       rmSync(profile, { recursive: true, force: true });
     } catch {
       /* ignore */
+    }
+    if (server) {
+      try {
+        server.child.kill('SIGKILL');
+      } catch {
+        /* ignore */
+      }
+      try {
+        rmSync(server.dataDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
   };
 

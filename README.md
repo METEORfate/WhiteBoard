@@ -43,7 +43,15 @@ node server/index.js
 # 3. 在 A 窗口画图形，B 窗口立刻出现；反过来也一样
 ```
 
-改端口：`PORT=9000 node server/index.js`。
+**端口被占用会自动往后顺延**（8787 满了就用 8788…最多 10 个），启动日志里会写明实际地址。要指定端口：
+
+```powershell
+$env:PORT=9000; node server/index.js     # PowerShell
+```
+
+```bash
+PORT=9000 node server/index.js           # bash / zsh
+```
 
 ### 演示断网恢复（不用真的拔网线）
 
@@ -133,14 +141,45 @@ whiteboard/
 ## 测试
 
 ```bash
-npm test                 # 64 个单元 / 集成用例
-node scripts/e2e.mjs     # 浏览器端到端（需要本机 Chrome）
+npm test                 # 66 个单元 / 集成用例
+node scripts/e2e.mjs     # 浏览器端到端（需本机 Chrome，会自动起临时服务端）
 npm run report           # 重新生成 docs/测试报告.md
 ```
 
-当前状态：**单元 64/64 通过，端到端 15/15 通过**。端到端用本机 Chrome 通过裸 CDP 驱动两个真实标签页，覆盖双端同步、断网继续绘制、重连后指纹一致、并发修改不同字段两者都保留。
+当前状态：**单元 66/66 通过，端到端 15/15 通过**。端到端用本机 Chrome 通过裸 CDP 驱动两个真实标签页，覆盖双端同步、断网继续绘制、重连后指纹一致、并发修改不同字段两者都保留。
 
 每个用例用独立的临时 `DATA_DIR`，互不干扰，也不会污染仓库里的 `data/`。
+
+---
+
+## 常见问题
+
+**启动报 `EADDRINUSE: address already in use 0.0.0.0:8787`**
+
+上次的实例没关干净。现在的默认行为是自动顺延到 8788、8789…（最多 10 个），启动日志会写实际地址；10 个全被占用才会报错退出，并打印可复制的排查命令。
+
+想固定端口（部署 / 反向代理 / CI）就设 `STRICT_PORT=1`，冲突即失败退出：
+
+```powershell
+# 看谁占了端口并结束它（PowerShell）
+Get-NetTCPConnection -LocalPort 8787 -State Listen | % { Stop-Process -Id $_.OwningProcess -Force }
+
+# 或者换个端口 / 让系统分配
+$env:PORT=9000; node server/index.js
+$env:PORT=0;    node server/index.js     # 随机空闲端口，启动日志里有实际地址
+```
+
+**页面白屏 / 改了代码没生效**
+
+多半是浏览器缓存了旧的 ES Module。`Ctrl+Shift+R` 强刷；或 F12 看控制台是否有 404（说明模块路径错了，不是缓存问题）。
+
+**画布上有上一轮演示的图形，想清空**
+
+换个房间名就行：`?room=demo2`。要彻底清掉某个房间的数据，停掉服务后删 `data/<roomId>.jsonl`。
+
+**两个窗口画的图形互相看不到**
+
+看顶部状态条：不是「已连接」就点一下浏览器窗口（获得焦点会触发立即重连）；仍是「离线」则检查调试面板里的「模拟断网」是否被勾上了。
 
 ---
 

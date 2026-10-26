@@ -27,7 +27,7 @@ const FILES = [
   ['ws.test.js', 'WebSocket 协议实现 · 握手/分帧/掩码/分片'],
   ['sync.test.js', '多端实时同步 · 幂等、乱序、并发、房间隔离'],
   ['offline.test.js', '离线队列与重连 · 断网继续编辑、恢复后补齐'],
-  ['restart.test.js', '服务端重启 · 持久化与快照恢复'],
+  ['restart.test.js', '服务端重启与端口冲突 · 持久化、快照恢复、自动顺延'],
   ['client-store.test.js', '浏览器端文档状态 · 乐观应用与远端合并'],
 ];
 
