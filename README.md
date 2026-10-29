@@ -30,6 +30,8 @@ node server/index.js   →   打开 http://localhost:8787
 
 ## 快速开始
 
+公网免费演示托管使用仓库根目录的 `render.yaml`，具体配置和数据丢失边界见 [免费托管说明](docs/免费托管.md)。
+
 **前置条件**：Node.js ≥ 20（用到内置 `node:test`、`crypto.randomUUID`）。无需其他依赖。
 
 ```bash

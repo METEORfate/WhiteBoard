@@ -1,0 +1,23 @@
+# 免费演示托管：不挂载付费磁盘，休眠/重启/重新部署会丢失服务端房间日志。
+services:
+  - type: web
+    name: meteorfate-whiteboard
+    runtime: node
+    plan: free
+    region: singapore
+    branch: master
+    buildCommand: node --test "tests/*.test.js"
+    startCommand: node server/index.js
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    domains:
+      - whiteboard.dree.shop
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: STRICT_PORT
+        value: '1'
