@@ -99,10 +99,7 @@ const probeBuckets = new Map();
 function takeProbeToken(ip) {
   const now = Date.now();
   const b = probeBuckets.get(ip) || { tokens: CONFIG.roomProbePerMin, last: now };
-  b.tokens = Math.min(
-    CONFIG.roomProbePerMin,
-    b.tokens + ((now - b.last) / 60000) * CONFIG.roomProbePerMin,
-  );
+  b.tokens = Math.min(CONFIG.roomProbePerMin, b.tokens + ((now - b.last) / 60000) * CONFIG.roomProbePerMin);
   b.last = now;
   probeBuckets.set(ip, b);
   if (b.tokens < 1) return false;
@@ -546,8 +543,7 @@ export function stop() {
 
 export { server, rooms, connections, store };
 
-const isMain =
-  Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   start().catch((err) => {
     if (err.code === 'EADDRINUSE') {
