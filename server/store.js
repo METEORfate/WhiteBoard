@@ -5,8 +5,10 @@
  * 否则进程在广播后崩溃，客户端已经确认过的 op 就永久丢失了。
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { canonicalRoomId } from '../shared/protocol.js';
 
 export class Store {
   constructor(dir) {
@@ -15,8 +17,22 @@ export class Store {
     this.lineCounts = new Map();
   }
 
+  /**
+   * 房间日志文件路径。
+   * 这里必须归一化房间号：NTFS / APFS 大小写不敏感，`Team.jsonl` 与 `team.jsonl`
+   * 是同一个文件，但内存里是两个 Room——不归一化就会出现「两个房间共用一个日志」。
+   */
   fileOf(roomId) {
-    return join(this.dir, `${roomId}.jsonl`);
+    return join(this.dir, `${canonicalRoomId(roomId)}.jsonl`);
+  }
+
+  /** 磁盘上是否已有这个房间的数据（不加载，只 stat） */
+  has(roomId) {
+    try {
+      return statSync(this.fileOf(roomId)).size > 0;
+    } catch {
+      return false;
+    }
   }
 
   /**

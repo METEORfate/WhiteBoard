@@ -172,3 +172,47 @@ test('非法远端图形被丢弃且不影响本地状态', () => {
   assert.equal(store.applyRemote(null), false);
   assert.equal(store.list().length, 1);
 });
+
+test('批量粘贴只产生一条撤销记录，一次 Ctrl+Z 全部撤回', () => {
+  const store = makeStore();
+  const created = store.createShapes([
+    { type: 'rect', x: 0, y: 0, w: 10, h: 10 },
+    { type: 'rect', x: 30, y: 0, w: 10, h: 10 },
+    { type: 'rect', x: 60, y: 0, w: 10, h: 10 },
+  ]);
+
+  assert.equal(created.length, 3);
+  assert.equal(store.undoStack.length, 1, '三个图形应合并成一条撤销');
+  store.undo();
+  assert.equal(store.list().length, 0, '一次撤销应删掉全部三个');
+  store.redo();
+  assert.equal(store.list().length, 3, '重做应把三个都恢复');
+});
+
+test('批量删除只产生一条撤销记录', () => {
+  const store = makeStore();
+  const created = store.createShapes([
+    { type: 'rect', x: 0, y: 0, w: 10, h: 10 },
+    { type: 'rect', x: 30, y: 0, w: 10, h: 10 },
+  ]);
+  store.undoStack.length = 0;
+
+  assert.equal(store.deleteShapes(created.map((c) => c.id)), 2);
+  assert.equal(store.undoStack.length, 1);
+  assert.equal(store.list().length, 0);
+  store.undo();
+  assert.equal(store.list().length, 2, '一次撤销应恢复全部图形');
+});
+
+test('待发队列按 clientId 隔离：同房间的两个标签页不会互相覆盖', () => {
+  const a = makeStore({ roomId: 'shared-room', clientId: 'c-tab00001' });
+  const b = makeStore({ roomId: 'shared-room', clientId: 'c-tab00002' });
+
+  a.createShape({ type: 'rect', x: 0, y: 0, w: 10, h: 10 });
+  b.createShape({ type: 'rect', x: 5, y: 5, w: 10, h: 10 });
+
+  const queueA = JSON.parse(mem.get('wb:queue:shared-room:c-tab00001'));
+  const queueB = JSON.parse(mem.get('wb:queue:shared-room:c-tab00002'));
+  assert.equal(queueA.length, 1, 'A 的队列不应被 B 覆盖');
+  assert.equal(queueB.length, 1, 'B 的队列不应被 A 覆盖');
+});

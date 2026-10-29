@@ -1,0 +1,20 @@
+root = true
+
+# 统一编辑器行为，避免不同机器提交出「整文件 diff」
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.md]
+# Markdown 里的行尾双空格是硬换行，不能裁掉
+trim_trailing_whitespace = false
+
+[*.{json,jsonl}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab

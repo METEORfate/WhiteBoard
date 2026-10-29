@@ -3,170 +3,445 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-    <title>协作白板 · 支持离线与多人实时同步</title>
+    <title>协作白板 · 离线可用 · 多人实时同步</title>
     <meta name="description" content="支持多人在线实时协作、断网离线编辑与自动重连合并的白板" />
     <link rel="stylesheet" href="/client/css/style.css" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232563eb'/%3E%3Crect x='5' y='6' width='6' height='6' rx='1.5' fill='white'/%3E%3Ccircle cx='16.5' cy='9' r='3' fill='white'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='7' fill='%234f46e5'/%3E%3Crect x='5' y='6' width='6' height='6' rx='1.6' fill='white'/%3E%3Ccircle cx='16.5' cy='9' r='3' fill='white'/%3E%3Cpath d='M5 16.5h8' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"
     />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <rect x="3" y="3" width="8" height="8" rx="2" />
-            <circle cx="17" cy="7" r="4" />
-            <path d="M3 17h8M3 21h5M17 13v8M13 17h8" stroke-linecap="round" />
-          </svg>
-        </span>
-        <span class="brand-name">协作白板</span>
-        <span class="brand-tag">离线可用</span>
+    <!-- ══════════ 落地页：创建 / 加入房间 ══════════ -->
+    <div class="landing" id="landing" hidden>
+      <div class="landing-bg" aria-hidden="true">
+        <span class="orb orb-a"></span>
+        <span class="orb orb-b"></span>
+        <span class="orb orb-c"></span>
+        <div class="dots"></div>
       </div>
 
-      <div class="room-bar">
-        <label for="room-input">房间</label>
-        <input id="room-input" type="text" spellcheck="false" maxlength="64" autocomplete="off" />
-        <button id="copy-link" class="ghost-btn" title="复制当前房间链接">复制链接</button>
-      </div>
-
-      <div class="spacer"></div>
-
-      <div class="members" id="members" aria-label="在线成员"></div>
-
-      <div class="status" id="status" data-state="connecting">
-        <i class="dot"></i>
-        <span id="status-text">连接中…</span>
-      </div>
-
-      <button id="debug-toggle" class="icon-btn" title="同步调试面板" aria-label="同步调试面板">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <path d="M4 17l4-6 3 4 3-7 4 9" stroke-linecap="round" stroke-linejoin="round" />
-          <path d="M4 21h16" stroke-linecap="round" />
-        </svg>
-      </button>
-    </header>
-
-    <main class="stage">
-      <aside class="toolbar" id="toolbar" aria-label="工具栏">
-        <button class="tool is-active" data-tool="select" title="选择 (V)" aria-label="选择">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M5 3l14 8-6 1.5L10 20 5 3z" stroke-linejoin="round" />
-          </svg>
-        </button>
-        <button class="tool" data-tool="rect" title="矩形 (R)" aria-label="矩形">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <rect x="4" y="5" width="16" height="14" rx="2" />
-          </svg>
-        </button>
-        <button class="tool" data-tool="ellipse" title="椭圆 (O)" aria-label="椭圆">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <ellipse cx="12" cy="12" rx="8" ry="6.5" />
-          </svg>
-        </button>
-        <button class="tool" data-tool="text" title="文本 (T)" aria-label="文本">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M5 6h14M12 6v13M9 19h6" stroke-linecap="round" />
-          </svg>
-        </button>
-
-        <div class="tool-divider"></div>
-
-        <button class="tool" id="undo-btn" title="撤销 (Ctrl+Z)" aria-label="撤销">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M9 7L4 12l5 5" stroke-linecap="round" stroke-linejoin="round" />
-            <path d="M4 12h9a6 6 0 016 6v1" stroke-linecap="round" />
-          </svg>
-        </button>
-        <button class="tool" id="redo-btn" title="重做 (Ctrl+Shift+Z)" aria-label="重做">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M15 7l5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
-            <path d="M20 12h-9a6 6 0 00-6 6v1" stroke-linecap="round" />
-          </svg>
-        </button>
-        <button class="tool" id="delete-btn" title="删除选中 (Delete)" aria-label="删除">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" stroke-linecap="round" stroke-linejoin="round" />
-          </svg>
-        </button>
-
-        <div class="tool-divider"></div>
-
-        <button class="tool zoom-btn" id="zoom-btn" title="重置视图 (Ctrl+0)">100%</button>
-      </aside>
-
-      <div class="canvas-wrap" id="canvas-wrap">
-        <canvas id="board"></canvas>
-        <div class="presence-layer" id="presence-layer" aria-hidden="true"></div>
-        <div class="text-editor-wrap" id="text-editor-wrap" hidden>
-          <textarea id="text-editor" rows="1" spellcheck="false" placeholder="输入文本…"></textarea>
+      <header class="landing-nav">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3" y="3" width="8" height="8" rx="2" />
+              <circle cx="17" cy="7" r="4" />
+              <path d="M3 17h8M3 21h5M17 13v8M13 17h8" stroke-linecap="round" />
+            </svg>
+          </span>
+          <span class="brand-name">协作白板</span>
         </div>
-        <div class="hint-bar" id="hint-bar">
-          双击文本可编辑 · 空格/中键拖拽平移 · 滚轮缩放
+        <div class="nav-right">
+          <span class="server-pill" id="server-pill" data-state="checking">
+            <i class="dot"></i>
+            <span id="server-pill-text">检查服务…</span>
+          </span>
         </div>
-      </div>
-
-      <aside class="inspector" aria-label="样式面板">
-        <h3>样式</h3>
-
-        <div class="field">
-          <label for="fill-input">填充</label>
-          <div class="row">
-            <input type="color" id="fill-input" value="#dbeafe" />
-            <button class="chip" id="fill-none" title="设为透明">透明</button>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="stroke-input">描边</label>
-          <input type="color" id="stroke-input" value="#1e293b" />
-        </div>
-
-        <div class="field">
-          <label for="stroke-width-input">线宽</label>
-          <div class="row">
-            <input type="range" id="stroke-width-input" min="0" max="16" step="1" value="2" />
-            <output id="stroke-width-out">2</output>
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="font-size-input">字号</label>
-          <div class="row">
-            <input type="range" id="font-size-input" min="10" max="96" step="1" value="20" />
-            <output id="font-size-out">20</output>
-          </div>
-        </div>
-
-        <p class="panel-hint">选中图形后修改样式会立即同步给同房间其他成员。</p>
-
-        <div class="selection-card" id="selection-card">
-          <span class="muted">未选中图形</span>
-        </div>
-      </aside>
-    </main>
-
-    <section class="debug" id="debug" hidden aria-label="同步调试面板">
-      <header>
-        <strong>同步调试</strong>
-        <button id="debug-close" class="icon-btn small" aria-label="关闭">×</button>
       </header>
-      <dl>
-        <dt>连接状态</dt><dd id="dbg-state">-</dd>
-        <dt>serverSeq</dt><dd id="dbg-seq">-</dd>
-        <dt>待发队列</dt><dd id="dbg-queue">-</dd>
-        <dt>图形 / 可见</dt><dd id="dbg-shapes">-</dd>
-        <dt>收 / 发</dt><dd id="dbg-traffic">-</dd>
-        <dt>bootEpoch</dt><dd id="dbg-epoch">-</dd>
-        <dt>重连次数</dt><dd id="dbg-retry">-</dd>
-      </dl>
-      <label class="switch">
-        <input type="checkbox" id="dbg-offline" />
-        <span>模拟断网</span>
-      </label>
-      <div class="debug-log" id="debug-log"></div>
-    </section>
+
+      <main class="landing-main">
+        <section class="hero">
+          <p class="eyebrow"><span class="eyebrow-dot"></span>离线优先 · 多人实时协作</p>
+          <h1>
+            一块画板，<br />
+            <span class="grad">随手画，随时续。</span>
+          </h1>
+          <p class="lede">
+            断网也能接着画，网络恢复后自动合并；把房间链接发给同事，他们点开就能一起改。
+          </p>
+
+          <ul class="feature-list">
+            <li>
+              <span class="fi" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M4 12a8 8 0 0113.6-5.7L20 8" stroke-linecap="round" />
+                  <path d="M20 4v4h-4" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M20 12a8 8 0 01-13.6 5.7L4 16" stroke-linecap="round" />
+                  <path d="M4 20v-4h4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <div>
+                <b>实时同步</b>
+                <span>字段级 LWW 裁决，两个人同时拖同一个图形也不会错乱</span>
+              </div>
+            </li>
+            <li>
+              <span class="fi" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M5 13a4 4 0 01.6-8 6 6 0 0111.3 1.4A3.6 3.6 0 0118 13" stroke-linecap="round" />
+                  <path d="M12 12v8M12 20l-3-3M12 20l3-3" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <div>
+                <b>离线可用</b>
+                <span>修改先落本地并排队，重连后按序重放，不丢一笔</span>
+              </div>
+            </li>
+            <li>
+              <span class="fi" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M10 13a5 5 0 007.5.5l2-2A5 5 0 0012.5 4L11 5.5" stroke-linecap="round" />
+                  <path d="M14 11a5 5 0 00-7.5-.5l-2 2A5 5 0 0011.5 20L13 18.5" stroke-linecap="round" />
+                </svg>
+              </span>
+              <div>
+                <b>链接即邀请</b>
+                <span>无需注册登录，房间号就是凭证，发出去就能进</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section class="entry-card" aria-label="进入房间">
+          <div class="tabs" role="tablist">
+            <button class="tab is-active" id="tab-create" role="tab" data-tab="create">
+              创建房间
+            </button>
+            <button class="tab" id="tab-join" role="tab" data-tab="join">加入房间</button>
+          </div>
+
+          <div class="pane" data-pane="create">
+            <label class="field-label" for="create-name">
+              房间名 <span class="opt">可选</span>
+            </label>
+            <input
+              id="create-name"
+              class="text-input"
+              type="text"
+              maxlength="48"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="例如 retro-2026"
+            />
+            <p class="field-hint" id="create-hint">留空会自动生成一个 8 位房间号</p>
+
+            <button class="btn btn-primary btn-block" id="create-btn" type="button">
+              创建并进入
+            </button>
+          </div>
+
+          <div class="pane" data-pane="join" hidden>
+            <label class="field-label" for="join-input">房间号或邀请链接</label>
+            <input
+              id="join-input"
+              class="text-input"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="粘贴链接，或输入房间号"
+            />
+            <p class="field-hint" id="join-hint">支持直接粘贴带 <code>?room=</code> 的完整链接</p>
+
+            <button class="btn btn-primary btn-block" id="join-btn" type="button">加入房间</button>
+          </div>
+
+          <div class="recent" id="recent" hidden>
+            <div class="recent-head">
+              <span>最近打开</span>
+              <button class="link-btn" id="recent-clear" type="button">清空</button>
+            </div>
+            <ul id="recent-list"></ul>
+          </div>
+        </section>
+      </main>
+
+      <footer class="landing-foot">
+        房间号即凭证 · 不公开房间列表 · 所有修改落盘在服务端 JSONL
+      </footer>
+    </div>
+
+    <!-- ══════════ 白板应用 ══════════ -->
+    <div class="app" id="app" hidden>
+      <header class="topbar">
+        <a class="brand brand-link" href="/" title="返回首页">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="3" y="3" width="8" height="8" rx="2" />
+              <circle cx="17" cy="7" r="4" />
+              <path d="M3 17h8M3 21h5M17 13v8M13 17h8" stroke-linecap="round" />
+            </svg>
+          </span>
+          <span class="brand-name">协作白板</span>
+        </a>
+
+        <div class="room-chip-wrap">
+          <button class="room-chip" id="room-chip" type="button" aria-haspopup="dialog">
+            <span class="room-chip-label">房间</span>
+            <span class="room-chip-id" id="room-chip-id">—</span>
+            <svg class="room-chip-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button class="icon-btn subtle" id="copy-link" title="复制邀请链接" aria-label="复制邀请链接">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M10 13a5 5 0 007.5.5l2-2A5 5 0 0012.5 4L11 5.5" stroke-linecap="round" />
+              <path d="M14 11a5 5 0 00-7.5-.5l-2 2A5 5 0 0011.5 20L13 18.5" stroke-linecap="round" />
+            </svg>
+          </button>
+
+          <div class="popover share-pop" id="share-pop" role="dialog" aria-label="邀请协作" hidden>
+            <h4>邀请协作</h4>
+            <p class="pop-hint">把链接发给对方，点开就进入这个房间。</p>
+            <div class="share-row">
+              <input class="text-input mono" id="share-link" type="text" readonly />
+              <button class="btn btn-primary btn-sm" id="share-copy" type="button">复制</button>
+            </div>
+            <div class="pop-foot">
+              <button class="link-btn" id="switch-room" type="button">换个房间 →</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="spacer"></div>
+
+        <div class="members-wrap" id="members-wrap">
+          <div class="members" id="members" aria-label="在线成员"></div>
+          <span class="members-count" id="members-count"></span>
+        </div>
+
+        <div class="status" id="status" data-state="connecting">
+          <i class="dot"></i>
+          <span id="status-text">连接中…</span>
+        </div>
+
+        <div class="topbar-actions">
+          <button class="icon-btn" id="export-png" title="导出 PNG" aria-label="导出 PNG">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M12 4v10M12 14l-3.5-3.5M12 14l3.5-3.5" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M5 18.5h14" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button class="icon-btn" id="help-toggle" title="快捷键" aria-label="快捷键">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M9.6 9.2a2.5 2.5 0 114 2.1c-.9.6-1.6 1.2-1.6 2.3" stroke-linecap="round" />
+              <circle cx="12" cy="17" r="0.9" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button class="icon-btn" id="debug-toggle" title="同步调试面板" aria-label="同步调试面板">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M4 17l4-6 3 4 3-7 4 9" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M4 21h16" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="popover help-pop" id="help-pop" hidden>
+          <h4>快捷键</h4>
+          <dl class="kbd-list">
+            <dt><kbd>V</kbd></dt><dd>选择 / 移动</dd>
+            <dt><kbd>R</kbd></dt><dd>矩形</dd>
+            <dt><kbd>O</kbd></dt><dd>椭圆</dd>
+            <dt><kbd>T</kbd></dt><dd>文本</dd>
+            <dt><kbd>P</kbd></dt><dd>画笔（按住拖动）</dd>
+            <dt><kbd>双击</kbd></dt><dd>编辑文本</dd>
+            <dt><kbd>空格</kbd> / 中键</dt><dd>拖拽平移</dd>
+            <dt><kbd>滚轮</kbd></dt><dd>缩放（Ctrl+滚轮同）</dd>
+            <dt><kbd>Ctrl</kbd>+<kbd>C</kbd> / <kbd>V</kbd></dt><dd>复制 / 粘贴</dd>
+            <dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>原地复制一份</dd>
+            <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>撤销</dd>
+            <dt><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></dt><dd>重做</dd>
+            <dt><kbd>Delete</kbd></dt><dd>删除选中</dd>
+            <dt><kbd>Ctrl</kbd>+<kbd>0</kbd></dt><dd>重置视图</dd>
+          </dl>
+        </div>
+      </header>
+
+      <main class="stage">
+        <aside class="toolbar" id="toolbar" aria-label="工具栏">
+          <button class="tool is-active" data-tool="select" data-tip="选择 (V)" aria-label="选择">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M5 3l14 8-6 1.5L10 20 5 3z" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button class="tool" data-tool="rect" data-tip="矩形 (R)" aria-label="矩形">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="4" y="5" width="16" height="14" rx="2" />
+            </svg>
+          </button>
+          <button class="tool" data-tool="ellipse" data-tip="椭圆 (O)" aria-label="椭圆">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <ellipse cx="12" cy="12" rx="8" ry="6.5" />
+            </svg>
+          </button>
+          <button class="tool" data-tool="text" data-tip="文本 (T)" aria-label="文本">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M5 6h14M12 6v13M9 19h6" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button class="tool" data-tool="pen" data-tip="画笔 (P)" aria-label="画笔">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path
+                d="M4 20l1-4L15.5 5.5a2.1 2.1 0 013 3L8 19l-4 1z"
+                stroke-linejoin="round"
+                stroke-linecap="round"
+              />
+              <path d="M13.5 7.5l3 3" stroke-linecap="round" />
+            </svg>
+          </button>
+
+          <div class="tool-divider"></div>
+
+          <button class="tool" id="undo-btn" data-tip="撤销 (Ctrl+Z)" aria-label="撤销">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M9 7L4 12l5 5" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M4 12h9a6 6 0 016 6v1" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button class="tool" id="redo-btn" data-tip="重做 (Ctrl+Shift+Z)" aria-label="重做">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M15 7l5 5-5 5" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M20 12h-9a6 6 0 00-6 6v1" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button class="tool" id="delete-btn" data-tip="删除选中 (Delete)" aria-label="删除">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path
+                d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </aside>
+
+        <div class="canvas-wrap" id="canvas-wrap">
+          <canvas id="board"></canvas>
+          <div class="presence-layer" id="presence-layer" aria-hidden="true"></div>
+
+          <div class="empty-state" id="empty-state">
+            <div class="empty-art" aria-hidden="true">
+              <svg viewBox="0 0 120 84" fill="none">
+                <rect x="6" y="10" width="52" height="34" rx="6" fill="#eef2ff" stroke="#c7d2fe" />
+                <circle cx="90" cy="26" r="16" fill="#f5f3ff" stroke="#ddd6fe" />
+                <path d="M14 62h34" stroke="#c7d2fe" stroke-width="3" stroke-linecap="round" />
+                <path d="M60 66l16-16 6 6-16 16-8 2 2-8z" fill="#e0e7ff" stroke="#a5b4fc" />
+              </svg>
+            </div>
+            <h3>这张白板还是空的</h3>
+            <p>选左侧工具在画布上拖拽，或者直接从这里开始</p>
+            <div class="empty-actions">
+              <button class="btn btn-soft" data-quick="rect" type="button">矩形</button>
+              <button class="btn btn-soft" data-quick="ellipse" type="button">椭圆</button>
+              <button class="btn btn-soft" data-quick="text" type="button">文本</button>
+              <button class="btn btn-soft" data-quick="pen" type="button">画笔</button>
+            </div>
+          </div>
+
+          <div class="text-editor-wrap" id="text-editor-wrap" hidden>
+            <textarea id="text-editor" rows="1" spellcheck="false" placeholder="输入文本…"></textarea>
+          </div>
+
+          <div class="canvas-tools">
+            <div class="zoom-cluster">
+              <button class="zoom-btn" id="zoom-out" title="缩小" aria-label="缩小">−</button>
+              <button class="zoom-value" id="zoom-btn" title="重置为 100% (Ctrl+0)">100%</button>
+              <button class="zoom-btn" id="zoom-in" title="放大" aria-label="放大">+</button>
+              <button class="zoom-btn" id="zoom-fit" title="适应内容" aria-label="适应内容">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path
+                    d="M4 9V5.5A1.5 1.5 0 015.5 4H9M15 4h3.5A1.5 1.5 0 0120 5.5V9M20 15v3.5a1.5 1.5 0 01-1.5 1.5H15M9 20H5.5A1.5 1.5 0 014 18.5V15"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div class="hint-bar" id="hint-bar">
+              双击文本可编辑 · 空格/中键拖拽平移 · 滚轮缩放
+            </div>
+          </div>
+        </div>
+
+        <aside class="inspector" aria-label="属性面板">
+          <div class="inspector-head">
+            <h3>属性</h3>
+            <span class="sel-badge" id="sel-badge">未选中</span>
+          </div>
+
+          <p class="inspector-empty" id="inspector-empty">
+            在画布上选中一个图形，这里可以精确调整位置、尺寸与样式。
+          </p>
+
+          <div class="inspector-body" id="inspector-body" hidden>
+            <section class="group">
+              <h4>位置与尺寸</h4>
+              <div class="grid2">
+                <label class="num-field"><span>X</span><input id="num-x" type="number" step="1" /></label>
+                <label class="num-field"><span>Y</span><input id="num-y" type="number" step="1" /></label>
+                <label class="num-field"><span>W</span><input id="num-w" type="number" step="1" min="2" /></label>
+                <label class="num-field"><span>H</span><input id="num-h" type="number" step="1" min="2" /></label>
+              </div>
+            </section>
+
+            <section class="group">
+              <h4>填充</h4>
+              <div class="row">
+                <input type="color" id="fill-input" value="#dbeafe" />
+                <div class="swatches" id="fill-swatches">
+                  <button data-color="#dbeafe" style="--sw: #dbeafe" title="浅蓝"></button>
+                  <button data-color="#dcfce7" style="--sw: #dcfce7" title="浅绿"></button>
+                  <button data-color="#fef3c7" style="--sw: #fef3c7" title="浅黄"></button>
+                  <button data-color="#fee2e2" style="--sw: #fee2e2" title="浅红"></button>
+                  <button data-color="#f3e8ff" style="--sw: #f3e8ff" title="浅紫"></button>
+                </div>
+                <button class="chip" id="fill-none" type="button" title="设为透明">透明</button>
+              </div>
+            </section>
+
+            <section class="group">
+              <h4>描边</h4>
+              <div class="row">
+                <input type="color" id="stroke-input" value="#1e293b" />
+                <div class="range-field">
+                  <input type="range" id="stroke-width-input" min="0" max="16" step="1" value="2" />
+                  <output id="stroke-width-out">2</output>
+                </div>
+              </div>
+            </section>
+
+            <section class="group">
+              <h4>字号</h4>
+              <div class="range-field">
+                <input type="range" id="font-size-input" min="10" max="96" step="1" value="20" />
+                <output id="font-size-out">20</output>
+              </div>
+            </section>
+
+            <section class="group">
+              <h4>层级</h4>
+              <div class="btn-row">
+                <button class="btn btn-soft btn-sm" id="layer-front" type="button">置顶</button>
+                <button class="btn btn-soft btn-sm" id="layer-back" type="button">置底</button>
+              </div>
+            </section>
+
+            <div class="selection-card" id="selection-card"></div>
+          </div>
+        </aside>
+      </main>
+
+      <section class="debug" id="debug" hidden aria-label="同步调试面板">
+        <header>
+          <strong>同步调试</strong>
+          <button id="debug-close" class="icon-btn small" aria-label="关闭">×</button>
+        </header>
+        <dl>
+          <dt>连接状态</dt><dd id="dbg-state">-</dd>
+          <dt>serverSeq</dt><dd id="dbg-seq">-</dd>
+          <dt>待发队列</dt><dd id="dbg-queue">-</dd>
+          <dt>图形 / 可见</dt><dd id="dbg-shapes">-</dd>
+          <dt>收 / 发</dt><dd id="dbg-traffic">-</dd>
+          <dt>bootEpoch</dt><dd id="dbg-epoch">-</dd>
+          <dt>重连次数</dt><dd id="dbg-retry">-</dd>
+        </dl>
+        <label class="switch">
+          <input type="checkbox" id="dbg-offline" />
+          <span>模拟断网</span>
+        </label>
+        <div class="debug-log" id="debug-log"></div>
+      </section>
+    </div>
 
     <div class="toast-host" id="toast-host"></div>
 

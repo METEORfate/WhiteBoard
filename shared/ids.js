@@ -8,7 +8,7 @@
 
 const HEX = '0123456789abcdef';
 
-export function randomBytes(n) {
+export function randomBytes(n) {//生成n个随机字节
   const out = new Uint8Array(n);
   const c = globalThis.crypto;
   if (c && typeof c.getRandomValues === 'function') {
@@ -20,7 +20,7 @@ export function randomBytes(n) {
 }
 
 /** RFC4122 v4 UUID */
-export function uuid() {
+export function uuid() {//uuid()生成标准UUID V4
   const c = globalThis.crypto;
   if (c && typeof c.randomUUID === 'function') return c.randomUUID();
   const b = randomBytes(16);
@@ -32,7 +32,7 @@ export function uuid() {
 }
 
 /** 短随机串（用于 clientId、sessionEpoch 等非安全场景） */
-export function shortId(len = 10) {
+export function shortId(len = 10) {//生成指定长度的随机十六进制字符串。
   const b = randomBytes(len);
   let s = '';
   for (let i = 0; i < len; i += 1) s += HEX[b[i] & 0x0f];
@@ -44,6 +44,6 @@ export function shortId(len = 10) {
  * 服务端按 (clientId, sessionEpoch) 维护 clientSeq 高水位，
  * 这样「清空本地缓存后 clientSeq 归 1」不会被误判成重复投递。
  */
-export function newSessionEpoch() {
+export function newSessionEpoch() {//生成每次会话的标识。
   return `${Date.now().toString(36)}-${shortId(6)}`;
 }

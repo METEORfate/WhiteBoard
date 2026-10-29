@@ -11,7 +11,10 @@
     "start": "node server/index.js",
     "dev": "node server/index.js",
     "test": "node --test \"tests/*.test.js\"",
-    "report": "node scripts/report.js"
+    "e2e": "node scripts/e2e.mjs",
+    "report": "node scripts/report.js",
+    "format": "npx --yes prettier@3 --write .",
+    "format:check": "npx --yes prettier@3 --check ."
   },
   "keywords": ["whiteboard", "websocket", "offline-first", "lww", "crdt"],
   "license": "MIT"

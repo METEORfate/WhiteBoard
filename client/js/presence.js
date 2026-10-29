@@ -11,10 +11,12 @@ const ARROW_SVG = `<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org
 </svg>`;
 
 export class Presence {
-  constructor({ layer, board, onSend }) {
+  constructor({ layer, board, onSend, selfId = '' }) {
     this.layer = layer;
     this.board = board;
     this.onSend = onSend;
+    /** 自己的 clientId：成员列表里包含自己，但不能给自己画一个「远端光标」 */
+    this.selfId = selfId;
     this.peers = new Map();
     this._lastSent = 0;
     this._pending = null;
@@ -26,6 +28,7 @@ export class Presence {
     const alive = new Set();
     for (const m of list) {
       alive.add(m.clientId);
+      if (m.clientId === this.selfId) continue;
       if (!this.peers.has(m.clientId)) this._ensurePeer(m);
     }
     for (const id of [...this.peers.keys()]) {
@@ -35,6 +38,7 @@ export class Presence {
   }
 
   handle(msg) {
+    if (msg.clientId === this.selfId) return;
     if (msg.event === 'leave') {
       this._remove(msg.clientId);
       return;

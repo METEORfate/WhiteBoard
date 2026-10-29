@@ -16,7 +16,6 @@ export const MSG = Object.freeze({
   PRESENCE: 'presence',
   RESYNC: 'resync',
   ERROR: 'error',
-  // 浏览器 WebSocket API 不允许应用层发送控制帧，心跳只能走应用层消息
   PING: 'ping',
   PONG: 'pong',
 });
@@ -38,6 +37,8 @@ export const LIMITS = Object.freeze({
   MAX_TEXT_LEN: 2000,
   MAX_SHAPES_PER_ROOM: 5000,
   MAX_PATCH_FIELDS: 12,
+  /** 画笔单笔最多采样多少个点（每点两个坐标，即数组长度上限的 1/2） */
+  MAX_POINTS: 2000,
   MAX_ROOM_ID_LEN: 64,
   MAX_NAME_LEN: 32,
   MAX_QUEUE: 5000,
@@ -46,7 +47,7 @@ export const LIMITS = Object.freeze({
   MAX_PROTOCOL_VIOLATIONS: 20,
 });
 
-export const SHAPE_TYPES = Object.freeze(['rect', 'ellipse', 'text']);
+export const SHAPE_TYPES = Object.freeze(['rect', 'ellipse', 'text', 'pen']);
 
 /**
  * 每个可同步字段的规格。
@@ -62,6 +63,15 @@ export const FIELD_SPEC = Object.freeze({
   strokeWidth: { type: 'number', min: 0, max: LIMITS.MAX_STROKE_WIDTH, def: 2, integer: true },
   text: { type: 'string', maxLen: LIMITS.MAX_TEXT_LEN, def: '' },
   fontSize: { type: 'number', min: LIMITS.MIN_FONT_SIZE, max: LIMITS.MAX_FONT_SIZE, def: 20, integer: true },
+  /**
+   * 画笔笔迹的采样点，**相对图形左上角**的扁平数组 [x0,y0,x1,y1,…]。
+   *
+   * 为什么不存绝对坐标：移动一笔只要改 x/y 两个字段，不必把整串点重发一遍；
+   * 缩放时再按新旧宽高比例把相对点整体缩放即可（见 canvas.js 的 viewOf）。
+   * 相对坐标让「一笔」和「一个矩形」在合并逻辑里完全同构——都是字段级 LWW，
+   * 不需要为画笔引入第二种数据结构。
+   */
+  pts: { type: 'points', min: 0, max: LIMITS.MAX_SIZE, def: [] },
   /** 层叠顺序：新建图形用时间戳当 z，保证各端渲染层级一致 */
   z: { type: 'number', min: 0, max: 1e15, def: 0, integer: true },
   deleted: { type: 'boolean', def: false },
@@ -85,6 +95,20 @@ export function isUuid(v) {
 
 export function isValidRoomId(v) {
   return typeof v === 'string' && ROOM_ID_RE.test(v);
+}
+
+/**
+ * 房间号归一化：去掉首尾空白并转小写。
+ *
+ * 房间号同时是「内存里的 Map key」和「磁盘上的文件名」，而 Windows / macOS 的
+ * 文件系统大小写不敏感。若放任 `Team` 与 `team` 并存，内存里是两个房间、
+ * 磁盘上是同一个文件，重启后两份数据会混进一个日志里。
+ * 归一化放在协议层，客户端与服务端共用同一份实现，两边不会各说各话。
+ *
+ * 注意：归一化必须在**校验之后**用于建 key，绝不能拿归一化后的空串去建房。
+ */
+export function canonicalRoomId(raw) {
+  return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
 }
 
 export function isValidClientId(v) {
@@ -143,6 +167,24 @@ export function normalizeField(name, raw) {
   if (spec.type === 'boolean') {
     if (typeof raw !== 'boolean') return fail('BAD_BOOLEAN', `字段 ${name} 必须是布尔值`);
     return ok(raw);
+  }
+
+  if (spec.type === 'points') {
+    if (!Array.isArray(raw)) return fail('BAD_POINTS', `字段 ${name} 必须是数组`);
+    if (raw.length % 2 !== 0) return fail('BAD_POINTS', `字段 ${name} 的坐标必须成对出现`);
+    if (raw.length > LIMITS.MAX_POINTS * 2) {
+      return fail('POINTS_TOO_MANY', `字段 ${name} 超过 ${LIMITS.MAX_POINTS} 个点`);
+    }
+    const out = new Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) {
+      const n = raw[i];
+      // 与数值字段同样的策略：越界走 clamp（幂等），非有限数直接拒绝
+      if (typeof n !== 'number' || !Number.isFinite(n)) {
+        return fail('BAD_POINTS', `字段 ${name} 的坐标必须是有限数字`);
+      }
+      out[i] = Math.round(Math.min(spec.max, Math.max(spec.min, n)));
+    }
+    return ok(out);
   }
 
   return fail('BAD_SPEC', `字段 ${name} 规格未定义`);
@@ -214,6 +256,10 @@ export function normalizeOp(raw) {
     for (const f of REQUIRED_ON_CREATE) {
       if (!(f in patch)) return fail('MISSING_GEOMETRY', `create 缺少字段 ${f}`);
     }
+    // 画笔没有点就画不出任何东西，直接拒绝，避免产生「看不见的图形」
+    if (shapeType === 'pen' && !(Array.isArray(patch.pts) && patch.pts.length >= 4)) {
+      return fail('MISSING_POINTS', 'pen 至少需要两个采样点');
+    }
     // 新建图形一定不是墓碑
     patch.deleted = false;
   }
@@ -228,16 +274,18 @@ export function normalizeOp(raw) {
     ok: true,
     op: {
       opId,
-    roomId: raw.roomId,
-    clientId: raw.clientId,
-    sessionEpoch: raw.sessionEpoch,
-    clientSeq,
-    kind,
-    target,
-    shapeType,
-    ver,
-    patch,
-    ts,
+      // op 里的房间号也走归一化：客户端可能带着 `?room=Team` 进来，
+      // 服务端的房间 key 是 `team`，不归一化就会被 ROOM_MISMATCH 全量拒掉。
+      roomId: canonicalRoomId(raw.roomId),
+      clientId: raw.clientId,
+      sessionEpoch: raw.sessionEpoch,
+      clientSeq,
+      kind,
+      target,
+      shapeType,
+      ver,
+      patch,
+      ts,
     },
   };
 }

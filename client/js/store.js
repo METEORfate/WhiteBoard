@@ -16,9 +16,17 @@ import { OP_KIND, normalizeShape } from '../../shared/protocol.js';
 import { flatten, isVisible, maxVersion, mergeOp, mergeShape, shapesEqual } from '../../shared/merge.js';
 import { uuid } from '../../shared/ids.js';
 
-const DOC_KEY = (room) => `wb:doc:${room}`;
-const QUEUE_KEY = (room) => `wb:queue:${room}`;
-const SEQ_KEY = (room) => `wb:seq:${room}`;
+/**
+ * localStorage 键。
+ *
+ * 必须带 clientId：同一浏览器开两个标签页进同一房间时，两个 DocStore
+ * 各自持有独立的待发队列。键里不带 clientId 的话，后写的一方会把另一方的
+ * 待发队列整条覆盖——断网期间两个标签页的修改，刷新后只剩一个。
+ * 文档副本同理：合并是逐字段 LWW，两个标签页的副本本来就不该互相顶掉。
+ */
+const DOC_KEY = (room, clientId) => `wb:doc:${room}:${clientId}`;
+const QUEUE_KEY = (room, clientId) => `wb:queue:${room}:${clientId}`;
+const SEQ_KEY = (room, clientId) => `wb:seq:${room}:${clientId}`;
 
 const UNDO_LIMIT = 120;
 const DOC_SAVE_DEBOUNCE = 120;
@@ -30,6 +38,19 @@ function readJSON(key, fallback) {
     return JSON.parse(raw);
   } catch {
     return fallback;
+  }
+}
+
+/**
+ * 读一个原始字符串。
+ * localStorage 在「阻止所有站点数据」/ 无痕模式下会直接抛 SecurityError，
+ * 裸 getItem 会让 DocStore 构造失败、整页白屏，所以这里必须兜住。
+ */
+function readRaw(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
   }
 }
 
@@ -66,18 +87,18 @@ export class DocStore {
   // ── 持久化 ────────────────────────────────────────────────
 
   _restore() {
-    const cached = readJSON(DOC_KEY(this.roomId), []);
+    const cached = readJSON(DOC_KEY(this.roomId, this.clientId), []);
     for (const raw of cached) {
       const r = normalizeShape(raw);
       if (r.ok) this.shapes.set(r.shape.id, r.shape);
     }
 
-    const queue = readJSON(QUEUE_KEY(this.roomId), []);
+    const queue = readJSON(QUEUE_KEY(this.roomId, this.clientId), []);
     this.pending = Array.isArray(queue) ? queue.filter((op) => op && op.opId) : [];
 
-    const savedSeq = Number(localStorage.getItem(SEQ_KEY(this.roomId)) || 0);
+    const savedSeq = Number(readRaw(SEQ_KEY(this.roomId, this.clientId)) || 0);
     const maxQueued = this.pending.reduce((m, op) => Math.max(m, op.clientSeq || 0), 0);
-    this.clientSeq = Math.max(this.clientSeq, savedSeq, maxQueued);
+    this.clientSeq = Math.max(this.clientSeq, Number.isFinite(savedSeq) ? savedSeq : 0, maxQueued);
 
     if (this.shapes.size || this.pending.length) {
       this.onLog('info', `本地缓存恢复：${this.shapes.size} 图形 / ${this.pending.length} 条待同步`);
@@ -93,7 +114,7 @@ export class DocStore {
   }
 
   _writeDoc() {
-    writeJSON(DOC_KEY(this.roomId), [...this.shapes.values()]);
+    writeJSON(DOC_KEY(this.roomId, this.clientId), [...this.shapes.values()]);
   }
 
   /** 立即落盘（页面关闭前调用，避免防抖窗口内的编辑丢失） */
@@ -107,12 +128,12 @@ export class DocStore {
   }
 
   _persistQueue() {
-    writeJSON(QUEUE_KEY(this.roomId), this.pending);
+    writeJSON(QUEUE_KEY(this.roomId, this.clientId), this.pending);
   }
 
   _persistSeq() {
     try {
-      localStorage.setItem(SEQ_KEY(this.roomId), String(this.clientSeq));
+      localStorage.setItem(SEQ_KEY(this.roomId, this.clientId), String(this.clientSeq));
     } catch {
       /* ignore */
     }
@@ -185,7 +206,7 @@ export class DocStore {
    * 创建图形。style 中的字段会写进 create 的 patch，
    * 这样「新建即带样式」也是一次原子操作。
    */
-  createShape({ type, x, y, w, h, ...style }) {
+  createShape({ type, x, y, w, h, ...style }, { record = true } = {}) {
     const id = uuid();
     const patch = {
       x: Math.round(x),
@@ -198,17 +219,54 @@ export class DocStore {
     };
     const op = this._nextOp({ kind: OP_KIND.CREATE, target: id, patch, ver: 1, shapeType: type });
     this.shapes.set(id, mergeOp(null, op));
-    this._pushUndo(`创建${typeLabel(type)}`, [
-      {
-        id,
-        forward: { kind: OP_KIND.PATCH, patch: { ...patch } },
-        backward: { kind: OP_KIND.DELETE, patch: { deleted: true } },
-      },
-    ]);
+    if (record) {
+      this._pushUndo(`创建${typeLabel(type)}`, [
+        {
+          id,
+          forward: { kind: OP_KIND.PATCH, patch: { ...patch } },
+          backward: { kind: OP_KIND.DELETE, patch: { deleted: true } },
+        },
+      ]);
+    }
     this._enqueue(op);
     this.onChange();
     this._persistDoc();
     return { id, op };
+  }
+
+  /**
+   * 批量创建（粘贴）：整批只登记一条撤销记录。
+   * 逐个 createShape 会各 push 一条 undo，粘贴 3 个图形后 Ctrl+Z 只能删掉 1 个。
+   */
+  createShapes(specs, { label } = {}) {
+    const created = specs.map((spec) => this.createShape(spec, { record: false }));
+    if (created.length) {
+      this._pushUndo(
+        label || `粘贴 ${created.length} 个图形`,
+        created.map(({ id, op }) => ({
+          id,
+          forward: { kind: OP_KIND.PATCH, patch: { ...op.patch } },
+          backward: { kind: OP_KIND.DELETE, patch: { deleted: true } },
+        })),
+      );
+    }
+    return created;
+  }
+
+  /** 批量删除：整批只登记一条撤销记录，Ctrl+Z 一次全部恢复 */
+  deleteShapes(ids, { label } = {}) {
+    const items = [];
+    for (const id of ids) {
+      const op = this.deleteShape(id, { record: false });
+      if (!op) continue;
+      items.push({
+        id,
+        forward: { kind: OP_KIND.DELETE, patch: { deleted: true } },
+        backward: { kind: OP_KIND.PATCH, patch: { deleted: false } },
+      });
+    }
+    if (items.length) this._pushUndo(label || `删除 ${items.length} 个图形`, items);
+    return items.length;
   }
 
   /** 修改图形字段（移动、缩放、改样式、改文本都走这里） */
@@ -231,6 +289,10 @@ export class DocStore {
           backward: { kind: OP_KIND.PATCH, patch: prevPatch },
         },
       ]);
+    } else {
+      // 不记撤销 ≠ 没改状态：任何新改动都必须让 redo 失效。
+      // 否则「撤销 → 快速缩放（60ms 内松手，没记 undo）→ 重做」会把旧几何盖回去。
+      this.redoStack.length = 0;
     }
 
     this._enqueue(op);
@@ -387,6 +449,43 @@ export class DocStore {
     return true;
   }
 
+  /**
+   * 把一条「版本落后被拒」的 op 重新盖到权威版本之上。
+   *
+   * op 的 ver 在入队那一刻就冻结了（重试必须同戳，否则两端分叉），
+   * 但离线端的本地副本可能落后好几版，算出的 ver 必然输给在线端，
+   * 直接丢弃就等于「用户的离线修改凭空消失」。这里换一个新 opId、
+   * 用 max(本地, 权威)+1 重发一次，等价于「重连后的一次新写入」：
+   * 意图保留，代价是它可能覆盖对方在线期间的修改（后写者胜，可 Ctrl+Z 撤回）。
+   *
+   * 只重试一次，避免两端反复覆盖变成活锁；删除不参与重试，交给版本裁决。
+   *
+   * @param {object|null} op 被拒的原始 op
+   * @param {object|null} serverShape 服务端返回的权威图形
+   * @returns {object|null} 新 op，失败返回 null
+   */
+  rebase(op, serverShape) {
+    const current = op ? this.shapes.get(op.target) : null;
+    if (!current || !serverShape) return null;
+    if (op.kind === OP_KIND.DELETE || op.rebased) return null;
+
+    this.clientSeq += 1;
+    const next = {
+      ...op,
+      opId: uuid(),
+      clientSeq: this.clientSeq,
+      ver: Math.max(maxVersion(current), maxVersion(serverShape)) + 1,
+      ts: Date.now(),
+      rebased: true,
+    };
+    this.shapes.set(next.target, mergeOp(current, next));
+    this.pending.push(next);
+    this._persistSeq();
+    this._persistQueue();
+    this._persistDoc();
+    return next;
+  }
+
   // ── 队列 ─────────────────────────────────────────────────
 
   takePending() {
@@ -430,5 +529,6 @@ function typeLabel(type) {
   if (type === 'rect') return '矩形';
   if (type === 'ellipse') return '椭圆';
   if (type === 'text') return '文本';
+  if (type === 'pen') return '画笔';
   return '图形';
 }

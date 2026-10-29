@@ -282,3 +282,66 @@ test('ping 控制帧会被 pong 回应', async () => {
   assert.equal(pong, 'hb');
   socket.destroy();
 });
+
+test('握手与首帧挤在同一个 TCP 段里时，HELLO 不会被丢弃', async () => {
+  // 浏览器不会这样发，但协议实现必须扛得住：如果服务端在注册 'message'
+  // 监听器之前就 feed(head)，首帧会被 emit 给一个没有监听者的对象，
+  // 客户端随后只能 hello timeout。
+  const key = Buffer.from('0123456789abcdef').toString('base64');
+  const hello = {
+    type: 'hello',
+    roomId: 'ws-pipeline',
+    clientId: 'c-pipeline01',
+    sessionEpoch: 'ep-pipeline',
+    name: 'pipeline',
+    lastSeq: 0,
+  };
+  const payload = Buffer.from(JSON.stringify(hello));
+  const mask = Buffer.from([0x11, 0x22, 0x33, 0x44]);
+  const body = Buffer.alloc(payload.length);
+  for (let i = 0; i < payload.length; i += 1) body[i] = payload[i] ^ mask[i % 4];
+
+  const header =
+    payload.length < 126
+      ? Buffer.from([0x81, 0x80 | payload.length])
+      : Buffer.from([0x81, 0x80 | 126, payload.length >> 8, payload.length & 0xff]);
+  const frame = Buffer.concat([header, mask, body]);
+
+  const req = [
+    'GET /ws HTTP/1.1',
+    `Host: 127.0.0.1:${port}`,
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Key: ${key}`,
+    'Sec-WebSocket-Version: 13',
+    '',
+    '',
+  ].join('\r\n');
+
+  const socket = net.connect(port, '127.0.0.1');
+  const text = await new Promise((resolve, reject) => {
+    let buf = '';
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('未收到 welcome：握手同包的首帧被丢弃了'));
+    }, 3000);
+    socket.on('data', (d) => {
+      buf += d.toString('utf8');
+      if (buf.includes('"type":"welcome"')) {
+        clearTimeout(timer);
+        socket.destroy();
+        resolve(buf);
+      }
+    });
+    socket.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+    socket.on('connect', () => {
+      // 一次 write：Upgrade 请求 + 首帧在同一个 TCP 段里
+      socket.write(Buffer.concat([Buffer.from(req, 'utf8'), frame]));
+    });
+  });
+
+  assert.ok(text.includes('"type":"welcome"'));
+});

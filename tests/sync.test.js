@@ -253,7 +253,7 @@ test('非法数据：拒绝但不断连，房间状态不受影响', async () =>
 
   // 连接依然可用
   assert.equal(a.conn.isOpen, true, '非法数据不应断开连接');
-  const ok = await a.patchShape(id, { x: 123 }, 5);
+  const ok = await a.patchShape(id, { x: 123 }, 2);
   assert.equal(ok.ack.accepted, true, '后续合法 op 仍能处理');
 
   a.close();

@@ -146,11 +146,19 @@ export class WSConnection extends EventEmitter {
       /* socket 已坏，忽略 */
     }
     this.closed = true;
+    // 关闭后必须立刻停止接收：否则对端继续灌数据时 #onData 仍会 Buffer.concat，
+    // 而 #parse 首行就因为 closed 返回，这块内存再也没人消费——连接此时也已从
+    // 连接表移除，清扫器回收不到它。这里摘掉监听并 pause，再延时 destroy 兜底。
+    this.socket.pause();
+    this.socket.removeAllListeners('data');
     this.socket.end();
     this.#emitClose(code, reason);
+    const timer = setTimeout(() => this.socket.destroy(), 1000);
+    if (typeof timer.unref === 'function') timer.unref();
   }
 
   #onData(chunk) {
+    if (this.closed) return;
     this.lastSeen = Date.now();
     this.bytesIn += chunk.length;
     this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
@@ -356,7 +364,10 @@ export function acceptUpgrade(req, socket, head, opts = {}) {
   );
 
   const conn = new WSConnection(socket, opts);
-  conn.feed(head);
+  // 不要在这里 feed(head)：此刻调用方还没注册 'message' 监听器。
+  // 与握手挤在同一个 TCP 段里到达的首帧会被 emit 到一个没有监听者的
+  // EventEmitter 上，等于静默丢弃（客户端随后 hello timeout）。
+  // 由调用方在装配完监听器之后再 conn.feed(head)。
   return conn;
 }
 

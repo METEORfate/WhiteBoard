@@ -16,7 +16,7 @@ const wsMod = await import('../server/ws.js');
 const idsMod = await import('../shared/ids.js');
 const mergeMod = await import('../shared/merge.js');
 
-export const { start, stop, rooms, BOOT_EPOCH } = serverMod;
+export const { start, stop, rooms, BOOT_EPOCH, reapRooms, checkCreateQuota } = serverMod;
 export const { connectWS, waitFor } = wsMod;
 export const { uuid, newSessionEpoch, shortId } = idsMod;
 export const { mergeShape, isVisible, flatten } = mergeMod;

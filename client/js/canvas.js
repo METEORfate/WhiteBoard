@@ -15,6 +15,9 @@ const HANDLE_HIT = 7;
 const GRID_STEP = 24;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
+/** 导出 PNG 的画布上限：单边与总面积都留出余量，避免 toBlob 返回 null */
+const MAX_EXPORT_SIDE = 8192;
+const MAX_EXPORT_AREA = 64 * 1024 * 1024;
 
 export const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 
@@ -109,6 +112,49 @@ export class Board {
     this.render();
   }
 
+  /**
+   * 把视野对到所有图形上（「适应内容」）。
+   * 只在缩小时生效——把一个小矩形放大到铺满屏幕没有意义。
+   * @returns {boolean} 画布上没有图形时返回 false
+   */
+  fitContent(padding = 72) {
+    const flats = [];
+    for (const shape of this.getShapes()) {
+      const flat = this.viewOf(shape);
+      if (!flat || flat.deleted || flat.w <= 0 || flat.h <= 0) continue;
+      flats.push(flat);
+    }
+    if (!flats.length) return false;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const f of flats) {
+      if (f.x < minX) minX = f.x;
+      if (f.y < minY) minY = f.y;
+      if (f.x + f.w > maxX) maxX = f.x + f.w;
+      if (f.y + f.h > maxY) maxY = f.y + f.h;
+    }
+
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const availW = Math.max(1, this.width - padding * 2);
+    const availH = Math.max(1, this.height - padding * 2);
+    const scale = Math.min(
+      MAX_SCALE,
+      Math.max(MIN_SCALE, Math.min(availW / bw, availH / bh, 1)),
+    );
+
+    this.viewport = {
+      scale,
+      x: (this.width - bw * scale) / 2 - minX * scale,
+      y: (this.height - bh * scale) / 2 - minY * scale,
+    };
+    this.render();
+    return true;
+  }
+
   get zoomText() {
     return `${Math.round(this.viewport.scale * 100)}%`;
   }
@@ -117,10 +163,24 @@ export class Board {
 
   /** 应用拖动预览后的扁平视图 */
   viewOf(shape) {
-    const flat = flatten(shape);
+    const base = flatten(shape);
     const preview = this.getPreview();
     const patch = preview && typeof preview.get === 'function' ? preview.get(shape.id) : null;
-    if (patch) Object.assign(flat, patch);
+    if (!patch) return base;
+
+    const flat = { ...base, ...patch };
+    // 画笔的点是「相对左上角」的：宽高一变（缩放预览），点也要按同一比例缩放，
+    // 否则拖动把手的过程中笔迹纹丝不动，松手才突然跳一下。
+    // 若预览里已经带了 pts（工具层在算缩放时一并给了），以它为准。
+    if (
+      flat.type === 'pen' &&
+      Array.isArray(base.pts) &&
+      base.pts.length >= 4 &&
+      !patch.pts &&
+      (base.w !== flat.w || base.h !== flat.h)
+    ) {
+      flat.pts = scalePoints(base.pts, flat.w / (base.w || 1), flat.h / (base.h || 1));
+    }
     return flat;
   }
 
@@ -130,7 +190,11 @@ export class Board {
     for (let i = shapes.length - 1; i >= 0; i -= 1) {
       const flat = this.viewOf(shapes[i]);
       if (flat.deleted) continue;
-      if (flat.type === 'ellipse') {
+      if (flat.type === 'pen') {
+        // 一笔的包围盒可能很大（比如一条对角线），先看盒再逐段量距离，
+        // 否则点在对角线旁边的空白处也会把整笔选中
+        if (this._hitPen(flat, worldPt, tolerance)) return shapes[i].id;
+      } else if (flat.type === 'ellipse') {
         const cx = flat.x + flat.w / 2;
         const cy = flat.y + flat.h / 2;
         const rx = flat.w / 2 + tolerance;
@@ -151,6 +215,29 @@ export class Board {
       }
     }
     return null;
+  }
+
+  _hitPen(flat, pt, tolerance) {
+    const pts = flat.pts;
+    if (!Array.isArray(pts) || pts.length < 4) return false;
+    const reach = Math.max(tolerance, (flat.strokeWidth || 2) / 2 + 2);
+    if (
+      pt.x < flat.x - reach ||
+      pt.x > flat.x + flat.w + reach ||
+      pt.y < flat.y - reach ||
+      pt.y > flat.y + flat.h + reach
+    ) {
+      return false;
+    }
+    const limit = reach * reach;
+    for (let i = 0; i + 3 < pts.length; i += 2) {
+      const ax = flat.x + pts[i];
+      const ay = flat.y + pts[i + 1];
+      const bx = flat.x + pts[i + 2];
+      const by = flat.y + pts[i + 3];
+      if (distToSegmentSq(pt.x, pt.y, ax, ay, bx, by) <= limit) return true;
+    }
+    return false;
   }
 
   /** 单个选中图形的缩放把手命中（屏幕坐标） */
@@ -254,24 +341,50 @@ export class Board {
 
   _drawGrid() {
     const { ctx } = this;
-    const step = GRID_STEP * this.viewport.scale;
-    if (step < 9) return;
+    const scale = this.viewport.scale;
+
+    // 缩得很小时把网格步长翻倍，否则点阵密度会涨到几十万个 fillRect
+    let step = GRID_STEP * scale;
+    while (step > 0 && step < 10) step *= 2;
+    if (step <= 0) return;
 
     const offsetX = ((this.viewport.x % step) + step) % step;
     const offsetY = ((this.viewport.y % step) + step) % step;
+    const cols = Math.ceil(this.width / step) + 1;
+    const rows = Math.ceil(this.height / step) + 1;
 
-    ctx.fillStyle = '#d7dee9';
-    for (let x = offsetX; x < this.width; x += step) {
-      for (let y = offsetY; y < this.height; y += step) {
-        ctx.fillRect(Math.round(x), Math.round(y), 1, 1);
+    // 每 5 格一个稍重的点，给「拖远了」一个方向感；同一帧里按颜色批量画，
+    // 避免逐点切换 fillStyle。
+    const minor = [];
+    const major = [];
+    for (let i = 0; i < cols; i += 1) {
+      const x = Math.round(offsetX + i * step);
+      const worldX = (x - this.viewport.x) / scale;
+      const majorX = Math.round(worldX / GRID_STEP) % 5 === 0;
+      for (let j = 0; j < rows; j += 1) {
+        const y = Math.round(offsetY + j * step);
+        const worldY = (y - this.viewport.y) / scale;
+        const majorY = Math.round(worldY / GRID_STEP) % 5 === 0;
+        (majorX && majorY ? major : minor).push(x, y);
       }
     }
+
+    ctx.fillStyle = '#e2e8f2';
+    for (let k = 0; k < minor.length; k += 2) ctx.fillRect(minor[k], minor[k + 1], 1, 1);
+
+    ctx.fillStyle = '#cbd5e5';
+    for (let k = 0; k < major.length; k += 2) ctx.fillRect(major[k], major[k + 1], 2, 2);
   }
 
   _drawShape(flat) {
     if (!flat || flat.deleted) return;
     const { ctx } = this;
     const { x, y, w, h } = flat;
+    // 一笔水平/垂直的线，包围盒有一个方向为 0，不能按「空图形」丢掉
+    if (flat.type === 'pen') {
+      this._drawPen(flat);
+      return;
+    }
     if (w <= 0 || h <= 0) return;
 
     ctx.save();
@@ -288,6 +401,28 @@ export class Board {
       this._drawText(flat);
     }
 
+    ctx.restore();
+  }
+
+  /**
+   * 画笔笔迹。pts 是相对 (x, y) 的扁平数组，渲染时补回左上角偏移。
+   * 只描边不填充——一笔没有「内部」可言。
+   */
+  _drawPen(flat) {
+    const pts = flat.pts;
+    if (!Array.isArray(pts) || pts.length < 4) return;
+    const { ctx } = this;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(flat.x + pts[0], flat.y + pts[1]);
+    for (let i = 2; i < pts.length; i += 2) {
+      ctx.lineTo(flat.x + pts[i], flat.y + pts[i + 1]);
+    }
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1, flat.strokeWidth || 2);
+    ctx.strokeStyle = flat.stroke && flat.stroke !== 'transparent' ? flat.stroke : '#1f2933';
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -392,6 +527,70 @@ export class Board {
     ctx.restore();
   }
 
+  /**
+   * 把当前所有可见图形导出成一张 PNG。
+   *
+   * 复用 _drawShape 而不是另写一套绘制代码：导出图必须和屏幕上看到的一致，
+   * 两套绘制逻辑迟早会走样。做法是临时把 this.ctx 换成离屏画布的上下文。
+   *
+   * @returns {Promise<Blob|null>} 画布为空时返回 null
+   */
+  toPNGBlob({ padding = 32, scale = 2 } = {}) {
+    const flats = [];
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const shape of this.getShapes()) {
+      const flat = flatten(shape);
+      if (flat.deleted) continue;
+      const drawable =
+        flat.type === 'pen' ? Array.isArray(flat.pts) && flat.pts.length >= 4 : flat.w > 0 && flat.h > 0;
+      if (!drawable) continue;
+      flats.push(flat);
+      if (flat.x < minX) minX = flat.x;
+      if (flat.y < minY) minY = flat.y;
+      if (flat.x + flat.w > maxX) maxX = flat.x + flat.w;
+      if (flat.y + flat.h > maxY) maxY = flat.y + flat.h;
+    }
+    if (!flats.length) return Promise.resolve(null);
+
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    const w0 = bw + padding * 2;
+    const h0 = bh + padding * 2;
+    // 浏览器对 canvas 的边长与总面积都有硬上限（Chrome 单边 16384、总面积约 2.6 亿像素）。
+    // 图形散布很开时 2 倍图会直接超限，toBlob 回调给 null，
+    // 上层只能误报「画布上还没有图形」。这里按上限反算倍率，宁可导出小一点，也不返回空。
+    const limitScale = Math.min(
+      MAX_EXPORT_SIDE / w0,
+      MAX_EXPORT_SIDE / h0,
+      Math.sqrt(MAX_EXPORT_AREA / (w0 * h0)),
+    );
+    const effectiveScale = Math.max(0.05, Math.min(scale, limitScale));
+
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.ceil(Math.min(MAX_EXPORT_SIDE, w0 * effectiveScale)));
+    out.height = Math.max(1, Math.ceil(Math.min(MAX_EXPORT_SIDE, h0 * effectiveScale)));
+
+    const offCtx = out.getContext('2d');
+    offCtx.fillStyle = '#ffffff';
+    offCtx.fillRect(0, 0, out.width, out.height);
+    offCtx.scale(effectiveScale, effectiveScale);
+    offCtx.translate(-minX + padding, -minY + padding);
+
+    const prev = this.ctx;
+    this.ctx = offCtx;
+    try {
+      for (const flat of flats) this._drawShape(flat);
+    } finally {
+      this.ctx = prev;
+    }
+
+    return new Promise((resolve) => out.toBlob((blob) => resolve(blob), 'image/png'));
+  }
+
   /** 文本图形的屏幕包围盒（用于定位内联编辑器） */
   screenRectOf(id) {
     const shape = this.getShapes().find((s) => s.id === id);
@@ -412,4 +611,33 @@ export class Board {
     window.removeEventListener('resize', this._onResize);
     this._ro?.disconnect();
   }
+}
+
+/** 按比例缩放一组相对点（x 用 sx，y 用 sy），并取整——与服务端归一化口径一致 */
+export function scalePoints(pts, sx, sy) {
+  if (!Array.isArray(pts)) return [];
+  const out = new Array(pts.length);
+  for (let i = 0; i < pts.length; i += 2) {
+    out[i] = Math.round(pts[i] * sx);
+    out[i + 1] = Math.round(pts[i + 1] * sy);
+  }
+  return out;
+}
+
+/** 点到线段的距离平方（画笔命中测试用，避免每段都开方） */
+function distToSegmentSq(px, py, ax, ay, bx, by) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) {
+    const ddx = px - ax;
+    const ddy = py - ay;
+    return ddx * ddx + ddy * ddy;
+  }
+  let t = ((px - ax) * dx + (py - ay) * dy) / lenSq;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return (px - cx) * (px - cx) + (py - cy) * (py - cy);
 }

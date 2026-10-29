@@ -13,7 +13,7 @@
  *   max 满足交换律、结合律、幂等性 → 合并结果与消息到达顺序无关，
  *   重复投递无副作用 → 所有副本收到相同消息集合后必然收敛到同一状态。
  */
-
+ 
 import { FIELD_SPEC, PATCH_FIELDS } from './protocol.js';
 
 /** 全序戳比较：v → c → o 字典序。任意两个戳都有确定顺序。 */
@@ -56,7 +56,13 @@ export function flatten(shape) {
   const out = { id: shape.id, type: shape.type };
   for (const name of PATCH_FIELDS) {
     const cell = shape.fields[name];
-    out[name] = cell === undefined ? FIELD_SPEC[name].def : cell.val;
+    if (cell === undefined) {
+      // 数组类型的默认值不能直接引用 FIELD_SPEC 里那一份，否则任何一次
+      // 就地修改都会污染全局默认值（pts 就是这种情况）
+      out[name] = Array.isArray(FIELD_SPEC[name].def) ? [] : FIELD_SPEC[name].def;
+    } else {
+      out[name] = Array.isArray(cell.val) ? cell.val.slice() : cell.val;
+    }
   }
   return out;
 }
@@ -132,7 +138,13 @@ export function shapesEqual(a, b) {
     if (ka[i] !== kb[i]) return false;
     const x = a.fields[ka[i]];
     const y = b.fields[kb[i]];
-    if (x.val !== y.val || x.v !== y.v || x.c !== y.c || x.o !== y.o) return false;
+    if (x.v !== y.v || x.c !== y.c || x.o !== y.o) return false;
+    // 画笔的 pts 是数组：引用比较永远为 false，会让服务端误判「状态变了」
+    if (Array.isArray(x.val) || Array.isArray(y.val)) {
+      if (JSON.stringify(x.val) !== JSON.stringify(y.val)) return false;
+    } else if (x.val !== y.val) {
+      return false;
+    }
   }
   return true;
 }
