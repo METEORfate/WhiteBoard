@@ -147,8 +147,9 @@ const server = http.createServer((req, res) => {
 
   if (pathname === '/api/stats') {
     // 房间清单会把「有哪些房间、各有多少人」全部暴露出去，等于绕过「房间号即凭证」。
-    // 只对本机回环开放；部署到公网时它只服务于运维排查。
-    if (!isLoopback(ip)) {
+    // 生产环境的反向代理也可能从回环地址连接，不能将它当成本机运维请求。
+    // 生产环境禁用统计接口；本地开发仍只对回环地址开放。
+    if (process.env.NODE_ENV === 'production' || !isLoopback(ip)) {
       sendJson(res, 403, { error: 'FORBIDDEN', message: '房间统计仅限本机访问' });
       return;
     }
